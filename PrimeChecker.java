@@ -52,7 +52,7 @@ public class PrimeChecker {
    /*
     * Static Variable is declared to Print Prime Number Message 
     */
-   public static String PRIME_NUMBER_MESSAGE = " is a prime number";
+   public static String PRIME_NUMBER_MESSAGE = " is prime number";
 
    /*
     * Static Variable is declared to Print message if the number is not Prime Number
