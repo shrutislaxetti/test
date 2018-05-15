@@ -190,6 +190,6 @@ public class PrimeChecker {
       PrimeChecker primeChecker = new PrimeChecker(n);
       System.out.println("PRINTING RESULT USING PrimeChecker INSTANCE FUNCTION");
       System.out.println(primeChecker.toString());
-//modified 
+//modified .... 
    }
 }
