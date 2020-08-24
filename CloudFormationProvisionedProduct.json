@@ -30,9 +30,9 @@
   "EC2Instance": {
   "Type" : "AWS::ServiceCatalog::CloudFormationProvisionedProduct",
   "Properties" : {
-      "ProductName" : "EC2",
+      "ProductName" : "LinuxDesktop",
       "ProvisionedProductName" : "DemoEC2Instance",
-      "ProvisioningArtifactName" : "1.0",
+      "ProvisioningArtifactName" : "v1.0",
 	 
 	  "ProvisioningParameters" : [ 
 	               { "Key" : "InstanceType", "Value" : {"Ref":"InstanceType"}},
