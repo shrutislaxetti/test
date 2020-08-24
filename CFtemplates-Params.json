@@ -1,6 +1,6 @@
 {
   "Parameters":{
-     "KeyName": "Demo",
+     "KeyName": "demo",
      "InstanceType" : "t2.micro",
      "SSHLocation" :  "0.0.0.0/0"
       }
