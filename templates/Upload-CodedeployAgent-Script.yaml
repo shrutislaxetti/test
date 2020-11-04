@@ -15,8 +15,9 @@ Parameters:
   KMSKey:
    Type: String
   CICDAccountId:
-    Type: String
-
+   Type: String
+  UAI:
+   Type: String
 Resources:
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
