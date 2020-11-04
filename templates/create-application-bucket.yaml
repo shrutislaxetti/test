@@ -51,12 +51,8 @@ Resources:
       - Key: "DataClassification"
         Value: 'Temporary'
       - Key: "S3BucketName"
-        Value:  
-            'Fn::Transform':
-             - Name: 'String'
-               Parameters:
-                 InputString: !Join ["",[!Ref "AppName","-",!Ref "ENV","-","src"]]
-                 Operation: Lower
+        Value: !Join ["",[!Ref "UAI","-",!Ref "ENV","-","src"]]
+                 
 Outputs:
  BucketName:
   Description:  Bucket Name
@@ -66,4 +62,4 @@ Outputs:
       - '-'
       - - 'Bucket'
         - !Ref ENV
-        - 'src'
+        - 'Src'
