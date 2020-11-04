@@ -64,6 +64,6 @@ Outputs:
   Export:
     Name: !Join
       - '-'
-      - - !Ref AppName
+      - - 'Bucket'
         - !Ref ENV
         - 'src'
