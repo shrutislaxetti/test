@@ -1,0 +1,75 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ssm:GetParameter",
+                "ssm:GetParameters"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+            ],
+            "Resource": "*",
+            "Effect": "Allow"
+        },
+        {
+            "Action": [
+                "s3:get*"
+            ],
+            "Resource": "arn:aws:s3:::cicd-pipeline-artifacts-985242783906-us-east-1/*",
+            "Effect": "Allow"
+        },
+        {
+            "Action": [
+                "kms:Encrypt",
+                "kms:Decrypt",
+                "kms:ReEncrypt*",
+                "kms:GenerateDataKey*",
+                "kms:DescribeKey"
+            ],
+            "Resource": "arn:aws:kms:us-east-1:985242783906:key/*",
+            "Effect": "Allow"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "autoscaling:CompleteLifecycleAction",
+                "autoscaling:DeleteLifecycleHook",
+                "autoscaling:DescribeAutoScalingGroups",
+                "autoscaling:DescribeLifecycleHooks",
+                "autoscaling:PutLifecycleHook",
+                "autoscaling:RecordLifecycleActionHeartbeat",
+                "autoscaling:CreateAutoScalingGroup",
+                "autoscaling:UpdateAutoScalingGroup",
+                "autoscaling:EnableMetricsCollection",
+                "autoscaling:DescribeAutoScalingGroups",
+                "autoscaling:DescribePolicies",
+                "autoscaling:DescribeScheduledActions",
+                "autoscaling:DescribeNotificationConfigurations",
+                "autoscaling:DescribeLifecycleHooks",
+                "autoscaling:SuspendProcesses",
+                "autoscaling:ResumeProcesses",
+                "autoscaling:AttachLoadBalancers",
+                "autoscaling:AttachLoadBalancerTargetGroups",
+                "autoscaling:PutScalingPolicy",
+                "autoscaling:PutScheduledUpdateGroupAction",
+                "autoscaling:PutNotificationConfiguration",
+                "autoscaling:PutLifecycleHook",
+                "autoscaling:DescribeScalingActivities",
+                "autoscaling:DeleteAutoScalingGroup",
+                "ec2:DescribeInstances",
+                "ec2:DescribeInstanceStatus",
+                "ec2:TerminateInstances",
+                "tag:GetResources"
+            ],
+            "Resource": "*"
+
+        }
+    ]
+}

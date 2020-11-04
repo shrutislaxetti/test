@@ -1,0 +1,364 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template creates the base infrastructure required for the CICD cross account app deployment
+Parameters:
+  GitRepoName:
+    Description:  Name of the application infra zip file uploaded to s3 bucket in CICD account.
+    Type: String
+    Default: "springpetasg-infra"
+  AppName:
+    Description: (Required) Enter Application Name.
+    Type: String
+    AllowedPattern: '[^\s]+'
+    ConstraintDescription: application name tag min 3 and max 50 characters
+    MinLength: 3
+    MaxLength: 50
+    Default: sprinpetgasg
+  UAI:
+    Description: (Required) Enter ServiceNow ID.
+    Type: String
+    AllowedPattern: '[^\s]+'
+    ConstraintDescription: ' uai tag min 3 and max 50 characters'
+    MinLength: 3
+    MaxLength: 50
+  DevelopmentAccount:
+    Description: Enter Account Number of the Desired Application Environment
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /cicd/codedeploy/Non-Production/accountnumber
+  Name:
+    Type: String
+    Default: springpetasg
+  AppROLE:
+    Type: String
+    Default: app
+  ProductOS:
+    Type: String
+    Default: Linux-Amazon-V2
+  ScriptName:
+    Type: String
+    Default: installcodedeploy.sh
+  InstanceType:
+    Type: String
+    Default: t3.small
+Resources:
+  ResolveCICDKMS:
+    Type: Custom::get-kms-arn
+    Properties:
+      ServiceToken: !Join
+        - ':'
+        - - 'arn:aws:lambda'
+          - !Ref AWS::Region
+          - !Ref AWS::AccountId
+          - 'get-kms-arn'
+      KeyAlias: 'alias/cicd-kmskey'
+  GenerateParams:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                  python: 3.7
+            build:
+              commands:
+                - cd scripts
+                - python convert-params.py
+          artifacts:
+            files: '**/*'
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:2.0
+        Type: LINUX_CONTAINER
+      Name: !Sub "GenerateParams-${AppName}"
+      ServiceRole: !Sub arn:aws:iam::${AWS::AccountId}:role/CICD-CodeBuildService-Role
+      EncryptionKey: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/${ResolveCICDKMS.key_id}
+
+  CodeBuildCfnNag:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Sub 'CodeBuildCfnNag-${AppName}'
+      Description: Download scripts and Run CFN_NAG on templates
+      ServiceRole: !Sub 'arn:aws:iam::${AWS::AccountId}:role/CICD-CodeBuildService-Role'
+      EncryptionKey: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/${ResolveCICDKMS.key_id}
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: 'aws/codebuild/ruby:2.5.3'
+        EnvironmentVariables:
+          - Name: REGION_NAME
+            Value: !Ref 'AWS::Region'
+          - Name: ACCOUNT_ID
+            Value: !Ref 'AWS::AccountId'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - export current=`pwd`
+                - apt-get -y update
+                - gem install cfn-nag
+                - apt-get install -y dos2unix
+            pre_build:
+              commands:
+                - export LC_ALL="en_US.UTF-8"
+                - locale-gen en_US en_US.UTF-8
+                - dpkg-reconfigure locales
+            build:
+              commands:
+                - |
+                  #!/bin/bash
+                  for f in templates/*.yaml
+                  do
+                      if cfn_nag_scan --input-path "$f"; then
+                          echo "$f PASSED"
+                      else
+                          echo "$f FAILED"
+                          touch FAILED
+                      fi
+                  done
+
+                  if [ -e FAILED ]; then
+                    echo cfn-nag FAILED at least once!
+                    exit 1
+                  else
+                    echo cfn-nag PASSED on all files!
+                    exit 0
+                  fi
+      TimeoutInMinutes: 10
+  Pipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      Name: !Sub '${GitRepoName}-Pipeline'
+      RoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/CICD-PipelineService-Role'
+      ArtifactStore:
+        Type: S3
+        Location: !Sub 'cicd-pipeline-artifacts-${AWS::AccountId}-${AWS::Region}'
+        EncryptionKey:
+          Id: !GetAtt ResolveCICDKMS.key_id
+          Type: KMS
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: TemplateSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: S3
+                Version: '1'
+              Configuration:
+                S3Bucket: !Sub '${AWS::AccountId}-${AWS::Region}-cicd-src'
+                PollForSourceChanges: true
+                S3ObjectKey: !Sub '${GitRepoName}.zip'
+              OutputArtifacts:
+                - Name: SourceArtifacts
+              RunOrder: 1
+        - Name: ValidateParams
+          Actions:
+            - Name: GenerateParamFile
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref GenerateParams
+              InputArtifacts:
+                - Name: SourceArtifacts
+              OutputArtifacts:
+                - Name: SourceAPArtifacts
+              RunOrder: 1
+        - Name: PreDeployTests
+          Actions:
+            - InputArtifacts:
+                - Name: SourceAPArtifacts
+              Name: DownloadScriptsAndRuncfnNag
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: '1'
+                Provider: CodeBuild
+              OutputArtifacts:
+                - Name: DownloadScripts
+              Configuration:
+                ProjectName: !Ref CodeBuildCfnNag
+              RunOrder: 1
+        - Name: DeploytoDev
+          Actions:
+            - Name: !Sub 'CreateBucket-${AppName}-Dev'
+              RunOrder: 1
+              InputArtifacts:
+                - Name: SourceAPArtifacts
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormation
+              RoleArn: !Sub 'arn:aws:iam::${DevelopmentAccount}:role/CICD-Deployment-Role'
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn: !Sub >-
+                  arn:aws:iam::${DevelopmentAccount}:role/CICD-Cloudformation-Role
+                Capabilities: CAPABILITY_NAMED_IAM
+                StackName: !Sub Create-Bucket-For-${AppName}
+                TemplatePath: >-
+                  SourceAPArtifacts::templates/create-application-bucket.yaml
+                ParameterOverrides: !Sub |
+                  {
+                    "AppName": "${AppName}",
+                    "UAI": "${UAI}",
+                    "ENV": "dev",
+                    "AppROLE": "${AppROLE}"
+                  }
+            - Name: !Sub Create-CodeBuild-For-${AppName}-UserData-Script
+              RunOrder: 2
+              InputArtifacts:
+                - Name: SourceAPArtifacts
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormation
+              RoleArn: !Sub 'arn:aws:iam::${DevelopmentAccount}:role/CICD-Deployment-Role'
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn: !Sub >-
+                  arn:aws:iam::${DevelopmentAccount}:role/CICD-Cloudformation-Role
+                Capabilities: CAPABILITY_NAMED_IAM
+                StackName: !Sub Upload-${AppName}-UserData-ScriptToS3
+                TemplatePath: SourceAPArtifacts::templates/Upload-CodedeployAgent-Script.yaml
+                ParameterOverrides: !Sub |
+                  {
+                    "AppName": "${AppName}",
+                    "CICDAccountId": "${AWS::AccountId}",
+                    "ENV": "dev",
+                    "KMSKey": "${ResolveCICDKMS.key_id}"
+                  }
+                  
+            - Name: InvokeCodebuild-ToUploadScriptToS3
+              RunOrder: 3
+              InputArtifacts:
+                - Name: SourceAPArtifacts
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: '1'
+                Provider: CodeBuild
+              RoleArn: !Sub 'arn:aws:iam::${DevelopmentAccount}:role/CICD-Deployment-Role'
+              Configuration:
+                ProjectName: !Sub arn:aws:codebuild:${AWS::Region}:${DevelopmentAccount}:project/${AppName}-Codebuild-UploadScripts
+            - Name: CreateManagedPolicy
+              RunOrder: 4
+              InputArtifacts:
+                - Name: SourceAPArtifacts
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormation
+              RoleArn: !Sub "arn:aws:iam::${DevelopmentAccount}:role/CICD-Deployment-Role"
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn: !Sub "arn:aws:iam::${DevelopmentAccount}:role/CICD-Cloudformation-Role"
+                Capabilities: CAPABILITY_NAMED_IAM
+                StackName: !Sub CreateManagedPolicy-${AppName}
+                TemplatePath: SourceAPArtifacts::templates/create-managed-policy.yaml
+                TemplateConfiguration: SourceAPArtifacts::parameters/attach-policy.json
+                ParameterOverrides: !Sub |
+                  {
+                    "AppName": "${AppName}"
+                  }
+            - Name: CreateAutoScaling-ForCodeDeploy
+              RunOrder: 5
+              InputArtifacts:
+                - Name: SourceAPArtifacts
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormation
+              RoleArn: !Sub 'arn:aws:iam::${DevelopmentAccount}:role/CICD-Deployment-Role'
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn: !Sub >-
+                  arn:aws:iam::${DevelopmentAccount}:role/CICD-Cloudformation-Role
+                Capabilities: CAPABILITY_NAMED_IAM
+                StackName: !Sub CreateASG-For-${AppName}
+                TemplatePath: 'SourceAPArtifacts::templates/create-autoscaling.yaml'
+                TemplateConfiguration: SourceAPArtifacts::parameters/App-params-dev.json
+                ParameterOverrides: !Sub |
+                  {
+                     "AppName": "${AppName}",
+                     "UAI": "${UAI}",
+                     "ENV": "dev",
+                     "Name": "${Name}"
+                     }
+            - Name: !Sub Create-${AppName}-CodeDeploy-Role
+              RunOrder: 6
+              InputArtifacts:
+                - Name: SourceAPArtifacts
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormation
+              RoleArn: !Sub "arn:aws:iam::${DevelopmentAccount}:role/CICD-Deployment-Role"
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn: !Sub "arn:aws:iam::${DevelopmentAccount}:role/CICD-Cloudformation-Role"
+                Capabilities: CAPABILITY_NAMED_IAM
+                StackName: !Sub Create-${AppName}-Codedeploy-Role
+                TemplatePath: SourceAPArtifacts::templates/create-codedeploy-service-role.yaml
+                ParameterOverrides: !Sub |
+                  {
+                    "AppName": "${AppName}",
+                    "Name": "${Name}",
+                    "CICDAccountId": "${AWS::AccountId}",
+                    "ENV": "dev",
+                    "KMSKey": "${ResolveCICDKMS.key_id}"
+                  }
+        - Name: DeploytoQA-Approval
+          Actions:
+            - Name: !Sub "ApproveQA-Deployment"
+              RunOrder: 1
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: '1'
+                Provider: Manual
+              RoleArn: !Sub "arn:aws:iam::${DevelopmentAccount}:role/CICD-Deployment-Role"
+        # - Name: DeploytoQA
+        #   Actions:
+        #     - Name: !Sub "CreateBucket-${AppName}-QA"
+        #       RunOrder: 1
+        #       InputArtifacts:
+        #         - Name: SourceArtifacts
+        #       ActionTypeId:
+        #         Category: Deploy
+        #         Owner: AWS
+        #         Version: '1'
+        #         Provider: CloudFormation
+        #       RoleArn: !Sub "arn:aws:iam::${DevelopmentAccount}:role/CICD-Deployment-Role"
+        #       Configuration:
+        #         ActionMode: REPLACE_ON_FAILURE
+        #         RoleArn: !Sub "arn:aws:iam::${DevelopmentAccount}:role/CICD-Cloudformation-Role"
+        #         Capabilities: CAPABILITY_NAMED_IAM
+        #         StackName: !Sub "CreateBucketForTarget-${AppName}-QA"
+        #         TemplatePath: SourceArtifacts::deployment/templates/create-bucket-for-target-cf.yaml
+        #         ParameterOverrides: !Sub |
+        #           {
+        #             "AppName": "${AppName}",
+        #             "UAI": "${UAI}",
+        #             "ENV": "QA"
+        #           }      
+Outputs:
+  PipelineUrl:
+    Value: !Sub >-
+      https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${Pipeline}

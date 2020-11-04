@@ -1,0 +1,214 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This template creates the compenents for Auto Scaling Group
+Parameters:
+  UAI:
+    Type: String
+  AppName:
+    Type: String
+  Name:
+    Type: String
+  AppROLE:
+    Type: String
+    Default: "app"
+  ENV:
+    Type: String
+    Default: "dev"
+  ProductOS:
+      Type: String
+      Default: "Linux-Amazon-V2"
+  ScriptName:
+    Type: String
+    Default: installcodedeploy.sh
+  InstanceType:
+    Type: String
+    Default: 't3.small'
+#  Subnet:
+#    Type: String
+#   Default: subnet-0f323d5aa8fbf8f9c
+
+  #AUTOSCALING
+  MinServers:
+    Default: "2"
+    Type: String
+    Description: Minimum Number of ec2 instances to create as part of the autoscaling
+  DesiredCapacity:
+    Default: "2"
+    Type: String
+    Description: Number of ec2 instances you want to start with
+  MaxServers:
+    Default: "2"
+    Type: String
+    Description: Maximum Number of ec2 instances to create
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: Tags (Mandatory)
+        Parameters:
+          - Name
+          - AppName
+          - AppROLE
+          - ENV
+          - UAI
+      -
+        Label:
+          default: Auto Scaling Group parameters (Mandatory)
+        Parameters:
+          - MinServers
+          - DesiredCapacity
+          - MaxServers
+          - InstanceType
+          - ProductOS
+      -
+        Label:
+          default: Application needed inputs (Optional)
+        Parameters:
+        - ScriptName
+
+Resources:
+  VPCLookUp:
+    Type: Custom::VPCLookUp
+    Properties:
+      ServiceToken: !Join
+        - ':'
+        - - 'arn:aws:lambda'
+          - !Ref AWS::Region
+          - !Ref AWS::AccountId
+          - 'VPCLookup'
+
+  GetSG:
+    Type: Custom::GetCFOutputs
+    Properties:
+      ServiceToken: !Join
+        - ':'
+        - - 'arn:aws:lambda'
+          - !Ref AWS::Region
+          - !Ref AWS::AccountId
+          - 'GetCFOutputs'
+      stackArn: !GetAtt 'CodeDeployASGSG.CloudformationStackArn'
+      
+  GetInstanceProfile:
+    Type: Custom::GetCFOutputs
+    Properties:
+      ServiceToken: !Join
+        - ':'
+        - - 'arn:aws:lambda'
+          - !Ref AWS::Region
+          - !Ref AWS::AccountId
+          - 'GetCFOutputs'
+      stackArn: !GetAtt 'CreateInstanceProfile.CloudformationStackArn'
+
+  CreateInstanceProfile:
+    Type: "AWS::ServiceCatalog::CloudFormationProvisionedProduct"
+    Properties:
+     ProductName: "IAM-Instance-Profile"
+     ProvisioningArtifactName: "{{resolve:ssm:/ServiceCatalog/IAM-Instance-Profile/LatestVersion:1}}"
+     ProvisioningParameters:
+      - Key: "app"
+        Value: !Ref AppName
+      - Key: "uai"
+        Value: !Ref UAI
+      - Key: "role"
+        Value: !Ref AppROLE
+      - Key: "env"
+        Value: !Ref ENV
+      - Key: "InstanceProfileName"
+        Value: !Sub ${AppName}-ec2instanceprofile
+      - Key: "BucketAcessLevel"
+        Value: "Full Read Access"
+      - Key: "LambdaAcessLevel"
+        Value: ""
+      - Key: "SNSAccessLevel"
+        Value: ""
+      - Key: "CustomPolicy"
+        Value: !Sub "arn:aws:iam::${AWS::AccountId}:policy/${AppName}-ManagedPolicy"
+
+  CodeDeployASGSG:
+    Type: "AWS::ServiceCatalog::CloudFormationProvisionedProduct"
+    DependsOn: CreateInstanceProfile
+    Properties:
+     ProductName: "CustomSG"
+     ProvisioningArtifactName: "{{resolve:ssm:/ServiceCatalog/CustomSG/LatestVersion:1}}"
+     ProvisioningParameters:
+      - Key: "SGName"
+        Value: !Join ['', [!Ref Name , 'SG']]
+      - Key: "app"
+        Value: !Ref AppName
+      - Key: "uai"
+        Value: !Ref UAI
+      - Key: "role"
+        Value: !Ref AppROLE
+      - Key: "env"
+        Value: !Ref ENV
+     Tags:
+     - Key: "Name"
+       Value: !Join ['', [!Ref Name , 'SG']]
+
+  CodeDeployASGIngressSG:
+    Type: "AWS::ServiceCatalog::CloudFormationProvisionedProduct"
+    DependsOn: CodeDeployASGSG
+    Properties:
+     ProductName: "IngressRuleCustomSG"
+     ProvisioningArtifactName: "{{resolve:ssm:/ServiceCatalog/IngressRuleCustomSG/LatestVersion:1}}"
+     ProvisioningParameters:
+      - Key: "CustomSGId"
+        Value: !GetAtt GetSG.SecurityGroupId
+      - Key: "IngressIpProtocol"
+        Value: "tcp"
+      - Key: "IngressCidr"
+        Value: "10.0.0.0/8"
+      - Key: "FromPortIngress"
+        Value: "22"
+      - Key: "ToPortIngress"
+        Value: "22"
+#      - Key: "FromPortIngress"
+#       Value: "80"
+#      - Key: "ToPortIngress"
+#       Value: "80"
+      - Key: "InSourceSecurityGroupId"
+        Value: ""
+
+  CodeDeployASG:
+    Type: "AWS::ServiceCatalog::CloudFormationProvisionedProduct"
+    DependsOn: CodeDeployASGIngressSG
+    Properties:
+     ProductName: "AutoScaling Linux"
+     ProvisioningArtifactName: "{{resolve:ssm:/ServiceCatalog/AutoScalingLinux/LatestVersion:1}}"
+     ProvisioningParameters:
+      - Key: "Name"
+        Value: !Ref Name
+      - Key: "app"
+        Value: !Ref AppName
+      - Key: "uai"
+        Value: !Ref UAI
+      - Key: "role"
+        Value: !Ref AppROLE
+      - Key: "env"
+        Value: !Ref ENV
+      - Key: "InstanceType"
+        Value: !Ref InstanceType
+      - Key: "ProductOS"
+        Value: !Ref ProductOS
+      - Key: "SecurityGroupId"
+        Value: !GetAtt GetSG.SecurityGroupId
+      - Key: "InstanceProfile"
+        Value: !GetAtt GetInstanceProfile.InstanceProfileName
+      - Key: "BucketName"
+        #Value: !Sub '${AWS::AccountId}-${AWS::Region}-${AppName}-${ENV}-src-${AppName}'
+        Value: !Sub '${AWS::AccountId}-${AWS::Region}-${AppName}-${ENV}-src'
+      - Key: "ScriptName"
+        Value: !Ref ScriptName
+      - Key: "MinServers"
+        Value: !Ref MinServers
+      - Key: "DesiredCapacity"
+        Value: !Ref DesiredCapacity
+      - Key: "MaxServers"
+        Value: !Ref MaxServers
+     Tags:
+     - Key: "Name"
+       Value: !Ref Name
+
+
+

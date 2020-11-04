@@ -1,0 +1,192 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template creates the service role for the CodeDeploy service
+Parameters:
+  AppName:
+    Description:  (Required) Enter Application Name.
+    Type: String
+    AllowedPattern: "[^\\s]+"
+    ConstraintDescription: "application name tag min 3 and max 50 characters"
+    MinLength: 3
+    MaxLength: 50
+  Name:
+    Type: String
+    Default: springpetasg
+  ENV:
+    Description: Name of the Environment
+    Type: String
+  KMSKey:
+    Type: String
+  CICDAccountId:
+    Type: String
+ 
+Resources:
+  CodeDeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AppName}-codedeploy-service-role
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codedeploy.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+              - Resource: !Sub arn:aws:s3:::cicd-pipeline-artifacts-${CICDAccountId}-${AWS::Region}/*
+                Effect: Allow
+                Action:
+                  -  s3:get*
+              - Resource: !Sub arn:aws:kms:${AWS::Region}:${CICDAccountId}:key/*
+                Effect: Allow
+                Action:
+                  -  kms:Encrypt
+                  -  kms:Decrypt
+                  -  kms:ReEncrypt*
+                  -  kms:GenerateDataKey*
+                  -  kms:DescribeKey
+              - Action:
+                  -  codedeploy:CreateDeployment
+                  -  codedeploy:RegisterApplicationRevision'
+                  -  codedeploy:BatchGetDeploymentTargets
+                  -  codedeploy:BatchGetApplicationRevisions
+                  -  codedeploy:BatchGetApplications
+                  -  codedeploy:BatchGetDeploymentGroups
+                  -  codedeploy:BatchGetDeploymentInstances
+                  -  codedeploy:BatchGetDeployments
+                  -  codedeploy:GetDeploymentTarget
+                  -  codedeploy:ListApplications
+                  -  codedeploy:ListDeploymentTargets
+                  -  codedeploy:ListDeploymentConfigs
+                  -  codedeploy:CreateCloudFormationDeployment
+                  -  codedeploy:StopDeployment
+                  -  codedeploy:DeleteGitHubAccountToken
+                  -  codedeploy:CreateApplication
+                  -  codedeploy:UpdateApplication
+                Effect: Allow
+                Resource: '*'
+              - Sid: CodeStarNotificationsReadWriteAccess
+                Effect: Allow
+                Action:
+                  - 'codestar-notifications:CreateNotificationRule'
+                  - 'codestar-notifications:DescribeNotificationRule'
+                  - 'codestar-notifications:UpdateNotificationRule'
+                  - 'codestar-notifications:Subscribe'
+                  - 'codestar-notifications:Unsubscribe'
+                Resource: '*'
+                Condition:
+                  StringLike:
+                    'codestar-notifications:NotificationsForResource': 'arn:aws:codedeploy:*'
+              - Sid: CodeStarNotificationsListAccess
+                Effect: Allow
+                Action:
+                  - 'codestar-notifications:ListNotificationRules'
+                  - 'codestar-notifications:ListTargets'
+                  - 'codestar-notifications:ListTagsforResource'
+                  - 'codestar-notifications:ListEventTypes'
+                Resource: '*'
+              - Sid: CodeStarNotificationsChatbotAccess
+                Effect: Allow
+                Action:
+                  - 'chatbot:DescribeSlackChannelConfigurations'
+                Resource: '*'
+              - Action: 
+                  - 'ec2:DescribeInstances'
+                  - 'ec2:DescribeInstanceStatus'
+                  - 'ec2:TerminateInstances'
+                Effect: Allow
+                Resource: '*'
+              - Effect: Allow
+                Action: 
+                 - 'cloudwatch:DescribeAlarms'
+                 - 'cloudwatch:PutMetricAlarm'
+                Resource: '*'
+              - Effect: Allow
+                Action: 
+                  - 'autoscaling:CompleteLifecycleAction'
+                  - 'autoscaling:DeleteLifecycleHook'
+                  - 'autoscaling:DescribeAutoScalingGroups'
+                  - 'autoscaling:DescribeLifecycleHooks'
+                  - 'autoscaling:PutLifecycleHook'
+                  - 'autoscaling:RecordLifecycleActionHeartbeat'
+                  - 'autoscaling:CreateAutoScalingGroup'
+                  - 'autoscaling:UpdateAutoScalingGroup'
+                  - 'autoscaling:EnableMetricsCollection'
+                  - 'autoscaling:DescribeAutoScalingGroups'
+                  - 'autoscaling:DescribePolicies'
+                  - 'autoscaling:DescribeScheduledActions'
+                  - 'autoscaling:DescribeNotificationConfigurations'
+                  - 'autoscaling:DescribeLifecycleHooks'
+                  - 'autoscaling:SuspendProcesses'
+                  - 'autoscaling:ResumeProcesses'
+                  - 'autoscaling:AttachLoadBalancers'
+                  - 'autoscaling:AttachLoadBalancerTargetGroups'
+                  - 'autoscaling:PutScalingPolicy'
+                  - 'autoscaling:PutScheduledUpdateGroupAction'
+                  - 'autoscaling:PutNotificationConfiguration'
+                  - 'autoscaling:PutLifecycleHook'
+                  - 'autoscaling:DescribeScalingActivities'
+                  - 'autoscaling:DeleteAutoScalingGroup'
+                  - 'ec2:DescribeInstances'
+                  - 'ec2:DescribeInstanceStatus'
+                  - 'ec2:TerminateInstances'
+                  - 'tag:GetResources'
+                Resource: '*'
+              - Effect: Allow
+                Action: 'iam:CreateServiceLinkedRole'
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'iam:AWSServiceName':
+                      - autoscaling.amazonaws.com
+                      - ec2scheduled.amazonaws.com
+                      - elasticloadbalancing.amazonaws.com
+                      - spot.amazonaws.com
+                      - spotfleet.amazonaws.com
+                      - transitgateway.amazonaws.com
+              - Effect: Allow
+                Action:
+                  - 'ssm:DescribeAssociation'
+                  - 'ssm:GetDeployablePatchSnapshotForInstance'
+                  - 'ssm:GetDocument'
+                  - 'ssm:DescribeDocument'
+                  - 'ssm:GetManifest'
+                  - 'ssm:GetParameter'
+                  - 'ssm:GetParameters'
+                  - 'ssm:ListAssociations'
+                  - 'ssm:ListInstanceAssociations'
+                  - 'ssm:PutInventory'
+                  - 'ssm:PutComplianceItems'
+                  - 'ssm:PutConfigurePackageResult'
+                  - 'ssm:UpdateAssociationStatus'
+                  - 'ssm:UpdateInstanceAssociationStatus'
+                  - 'ssm:UpdateInstanceInformation'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'ssmmessages:CreateControlChannel'
+                  - 'ssmmessages:CreateDataChannel'
+                  - 'ssmmessages:OpenControlChannel'
+                  - 'ssmmessages:OpenDataChannel'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'ec2messages:AcknowledgeMessage'
+                  - 'ec2messages:DeleteMessage'
+                  - 'ec2messages:FailMessage'
+                  - 'ec2messages:GetEndpoint'
+                  - 'ec2messages:GetMessages'
+                  - 'ec2messages:SendReply'
+                Resource: '*'
+
+    

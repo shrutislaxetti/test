@@ -1,0 +1,9 @@
+{
+  "Parameters": {
+     "AppName": "spgautam",
+     "InstanceType": "t3.small",
+     "AppROLE": "app",
+     "Name": "spgautam",
+     "ScriptName": "installcodedeploy.sh"
+  }
+}

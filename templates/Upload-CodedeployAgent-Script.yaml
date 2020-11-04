@@ -1,0 +1,111 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template creates a CodeBuild project to copy installation related script from CICD artifact bucket to application account bucket
+Parameters:
+  AppName:
+    Description:  (Required) Enter Application Name.
+    Type: String
+    AllowedPattern: "[^\\s]+"
+    ConstraintDescription: "application name tag min 3 and max 50 characters"
+    MinLength: 3
+    MaxLength: 50
+    Default: springpetasg
+  ENV:
+    Description: Name of the Environment
+    Type: String
+  KMSKey:
+   Type: String
+  CICDAccountId:
+    Type: String
+
+Resources:
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AppName}-codebuild-s3upload
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+              - Resource: !Sub arn:aws:s3:::cicd-pipeline-artifacts-${CICDAccountId}-${AWS::Region}/*
+                Effect: Allow
+                Action:
+                  -  s3:get*
+              - Resource: !Sub arn:aws:s3:::${CICDAccountId}-${AWS::Region}-cicd-src/*
+                Effect: Allow
+                Action:
+                  -  s3:get*
+              - Resource: !Sub arn:aws:s3:::${AWS::AccountId}-${AWS::Region}-${AppName}-${ENV}-src/*
+                Effect: Allow
+                Action:
+                  -  s3:put*
+                  -  s3:get*
+              - Resource: !Sub arn:aws:kms:${AWS::Region}:${CICDAccountId}:key/*
+                Effect: Allow
+                Action:
+                  -  kms:Encrypt
+                  -  kms:Decrypt
+                  -  kms:ReEncrypt*
+                  -  kms:GenerateDataKey*
+                  -  kms:DescribeKey
+              - Action:
+                  - 's3:Get*'
+                  - 's3:List*'
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - 'kms:Encrypt'
+                  - 'kms:Decrypt'
+                Resource: '*'
+                Effect: Allow
+  CodeBuildUploadScripts:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Sub ${AppName}-Codebuild-UploadScripts
+      Description: Copy install scripts to S3
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn  #!Sub arn:aws:iam::${AWS::AccountId}:role/CICD-CF-Init-Role
+      EncryptionKey: !Sub arn:aws:kms:${AWS::Region}:${CICDAccountId}:key/${KMSKey}
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: 'aws/codebuild/ubuntu-base:14.04'
+        EnvironmentVariables:
+          -
+            Name: CICD_BUCKET
+            Value: !Sub '${AWS::AccountId}-${AWS::Region}-${AppName}-${ENV}-src'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+              install:
+                  commands:
+                      - apt-get -y update
+              build:
+                  commands:
+                      - echo "List directories or files"
+                      - ls -lrt
+                      - echo "Current working directory"
+                      - pwd
+                      - echo "S3 Upload Beginning"
+                      - aws s3 cp ./scripts/installcodedeploy.sh s3://$CICD_BUCKET/
+              post_build:
+                  commands:
+                      - echo "Copy complete"
+      TimeoutInMinutes: 10
