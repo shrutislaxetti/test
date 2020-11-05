@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: This template creates a CodeBuild project to copy installation related script from CICD artifact bucket to application account bucket
+Description: This template creates a CodeBuild project to copy installation related script from CICD artifact bucket to application account bckt
 Parameters:
   AppName:
     Description:  (Required) Enter Application Name.
